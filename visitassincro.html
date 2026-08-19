@@ -379,7 +379,8 @@ html,body{height:100%;overscroll-behavior:none;background:var(--bg);color:var(--
 <div id="mod-manual" class="mbg hidden" onclick="if(event.target===this)closeM('mod-manual')">
   <div class="modal">
     <div class="mhandle"></div><div class="mtitle">DATOS DEL DNI</div>
-    <div class="fg"><label class="fl">Número de DNI *</label><input class="fi" id="m-dni" placeholder="12345678" type="number"/></div>
+    <div class="fg"><label class="fl">Número de DNI *</label><input class="fi" id="m-dni" placeholder="12345678" type="number" oninput="autocompletarPersona(this.value)"/></div>
+    <div id="m-autocomplete" class="hidden" style="background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.3);border-radius:var(--rs);padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--text2);font-weight:600">✅ Datos cargados automáticamente</div>
     <div class="fr2">
       <div class="fg"><label class="fl">Apellido *</label><input class="fi" id="m-ap" placeholder="PÉREZ"/></div>
       <div class="fg"><label class="fl">Nombre *</label><input class="fi" id="m-nom" placeholder="JUAN CARLOS"/></div>
@@ -600,6 +601,37 @@ function setupRealtime(){
     });
 }
 
+// ── DB PERSONAS (autocompletado permanente) ──
+async function loadPersona(dni){
+  try{
+    // Primero cache local
+    const cache=JSON.parse(localStorage.getItem('vreg_personas_cache')||'{}');
+    if(cache[dni])return cache[dni];
+    // Luego Supabase
+    const{data,error}=await sb.from('personas').select('*').eq('dni',dni).single();
+    if(error||!data)return null;
+    const p={apellido:data.apellido||'',nombre:data.nombre||'',sexo:data.sexo||'M',fechaNac:data.fecha_nac||'',domicilio:data.domicilio||''};
+    cache[dni]=p;
+    try{localStorage.setItem('vreg_personas_cache',JSON.stringify(cache))}catch(e){}
+    return p;
+  }catch(e){return null;}
+}
+async function savePersona(dni,datos){
+  const row={dni,apellido:datos.apellido||'',nombre:datos.nombre||'',sexo:datos.sexo||'M',fecha_nac:datos.fechaNac||'',domicilio:datos.domicilio||''};
+  try{
+    await sb.from('personas').upsert(row,{onConflict:'dni'});
+    const cache=JSON.parse(localStorage.getItem('vreg_personas_cache')||'{}');
+    cache[dni]=datos;
+    localStorage.setItem('vreg_personas_cache',JSON.stringify(cache));
+  }catch(e){
+    try{
+      const cache=JSON.parse(localStorage.getItem('vreg_personas_cache')||'{}');
+      cache[dni]=datos;
+      localStorage.setItem('vreg_personas_cache',JSON.stringify(cache));
+    }catch(e2){}
+  }
+}
+
 // ── PARSER DNI ──
 function soloLetras(s){return(s||'').replace(/[^A-Za-záéíóúÁÉÍÓÚñÑüÜ\s\-]/g,'').trim().toUpperCase();}
 function parseFechaDNI(s){
@@ -800,6 +832,13 @@ async function regEntry(){
         if(!ok){closeM('mod-confirm');return;}
       }
     }
+    // Guardar datos de la persona permanentemente (también desde escaneo)
+    if(pendingData.apellido&&pendingData.dni){
+      savePersona(pendingData.dni,{
+        apellido:pendingData.apellido,nombre:pendingData.nombre,
+        sexo:pendingData.sexo,fechaNac:pendingData.fechaNac,domicilio:pendingData.domicilio
+      });
+    }
     const nueva={
       id:uid(),
       apellido:pendingData.apellido||'',
@@ -861,11 +900,39 @@ async function regExitFixed(){
   saveCache(localCache);
 }
 
-function openManual(){$('mod-manual').classList.remove('hidden');}
+let autoTimer=null;
+async function autocompletarPersona(dni){
+  clearTimeout(autoTimer);
+  if(!dni||dni.length<7){$('m-autocomplete').classList.add('hidden');return;}
+  autoTimer=setTimeout(async()=>{
+    const p=await loadPersona(dni);
+    if(p&&p.apellido){
+      $('m-ap').value=p.apellido;
+      $('m-nom').value=p.nombre;
+      $('m-sx').value=p.sexo||'M';
+      $('m-fn').value=p.fechaNac||'';
+      $('m-dom').value=p.domicilio||'';
+      $('m-autocomplete').classList.remove('hidden');
+    } else {
+      $('m-autocomplete').classList.add('hidden');
+    }
+  },500);
+}
+
+function openManual(){
+  $('m-dni').value='';$('m-ap').value='';$('m-nom').value='';
+  $('m-fn').value='';$('m-dom').value='';
+  $('m-autocomplete').classList.add('hidden');
+  $('mod-manual').classList.remove('hidden');
+  setTimeout(()=>$('m-dni').focus(),200);
+}
 function confirmManual(){
   const dni=($('m-dni').value||'').trim(),ap=($('m-ap').value||'').trim().toUpperCase(),nom=($('m-nom').value||'').trim().toUpperCase();
   if(!dni||!ap){showToast('⚠️ DNI y Apellido son obligatorios');return;}
-  pendingData={apellido:ap,nombre:nom,dni,sexo:$('m-sx').value,fechaNac:$('m-fn').value,domicilio:($('m-dom').value||'').trim(),foto:null};
+  const sexo=$('m-sx').value,fechaNac=$('m-fn').value,domicilio=($('m-dom').value||'').trim();
+  pendingData={apellido:ap,nombre:nom,dni,sexo,fechaNac,domicilio,foto:null};
+  // Guardar datos de la persona permanentemente
+  savePersona(dni,{apellido:ap,nombre:nom,sexo,fechaNac,domicilio});
   closeM('mod-manual');openFotoScreen();
 }
 
