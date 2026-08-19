@@ -434,10 +434,22 @@ const initials=n=>n.trim().split(' ').slice(0,2).map(x=>x[0]||'').join('').toUpp
 const durMin=(a,b)=>{if(!a||!b)return'';const m=Math.round((new Date(b)-new Date(a))/60000);return m<60?m+'min':Math.floor(m/60)+'h '+m%60+'min'};
 
 // ── SYNC STATUS ──
+let syncOkTimer=null;
 function setSyncDot(state){
   const d=$('sync-dot');
+  // Si ya está en 'ok' y llega 'loading' de realtime, no lo pisamos
+  if(state==='loading'&&d.className.includes('ok'))return;
   d.className='sync-dot'+({ok:' ok',err:' err',loading:' loading'}[state]||'');
-  d.title={ok:'Sincronizado ✅',err:'Sin conexión ❌',loading:'Sincronizando...'}[state]||'';
+  d.title={ok:'Sincronizado ✅',err:'Sin conexión — reintentando...',loading:'Sincronizando...'}[state]||'';
+  // Si queda en error, reintentar en 8 segundos
+  if(state==='err'){
+    clearTimeout(syncOkTimer);
+    syncOkTimer=setTimeout(()=>{
+      fetchVisitas().then(()=>{renderAll();});
+    },8000);
+  } else if(state==='ok'){
+    clearTimeout(syncOkTimer);
+  }
 }
 
 // ── CACHE LOCAL (para mostrar datos rápido mientras carga Supabase) ──
@@ -566,10 +578,21 @@ async function saveVehiculo(dni,datos){
 // ── REALTIME: escuchar cambios de otros dispositivos ──
 function setupRealtime(){
   sb.channel('visitas-changes')
-    .on('postgres_changes',{event:'*',schema:'public',table:'visitas'},()=>{
-      fetchVisitas().then(()=>{renderAll();if($('tab-search').classList.contains('active'))renderSearch();});
+    .on('postgres_changes',{event:'*',schema:'public',table:'visitas'},async()=>{
+      // Fetch silencioso — no toca el sync dot
+      try{
+        const{data}=await sb.from('visitas').select('*').order('entrada',{ascending:false});
+        if(data){
+          localCache=(data||[]).map(mapFromDB);
+          saveCache(localCache);
+          renderAll();
+          if($('tab-search').classList.contains('active'))renderSearch();
+        }
+      }catch(e){console.warn('realtime fetch error:',e);}
     })
-    .subscribe();
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED')setSyncDot('ok');
+    });
 }
 
 // ── PARSER DNI ──
