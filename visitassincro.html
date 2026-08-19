@@ -190,6 +190,9 @@ html,body{height:100%;overscroll-behavior:none;background:var(--bg);color:var(--
 .fl{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);font-weight:700;margin-bottom:5px;display:block}
 .fi{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-family:var(--fb);font-size:14px;outline:none;-webkit-appearance:none}
 .fi:focus{border-color:var(--accent)}.fi::placeholder{color:var(--muted)}
+.fi[type=date]{color-scheme:dark}
+.fi[type=date]::-webkit-calendar-picker-indicator{filter:invert(1) brightness(2);cursor:pointer;padding:2px;border-radius:4px;background:rgba(0,212,170,.15)}
+.fi[type=date]::-webkit-calendar-picker-indicator:hover{background:rgba(0,212,170,.35)}
 .fr2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .si{width:100%;padding:11px 13px;background:var(--card);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-family:var(--fb);font-size:14px;font-weight:500;outline:none;margin-bottom:11px}
 .si:focus{border-color:var(--accent)}.si::placeholder{color:var(--muted)}
