@@ -1064,6 +1064,11 @@ renderAll();updExp();
 // Luego cargar de Supabase y actualizar
 fetchVisitas().then(()=>{renderAll();updExp();});
 setupRealtime();
+
+// Polling cada 15 segundos como respaldo del realtime
+setInterval(()=>{
+  fetchVisitas().then(()=>{renderAll();if($('tab-search').classList.contains('active'))renderSearch();});
+},15000);
 </script>
 </body>
 </html>
