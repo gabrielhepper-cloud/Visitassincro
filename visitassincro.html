@@ -241,6 +241,9 @@ html,body{height:100%;overscroll-behavior:none;background:var(--bg);color:var(--
     <!-- PC topbar -->
     <div class="pc-topbar">
       <h2 id="pc-tab-title">INICIO</h2>
+      <div id="usb-indicator" style="font-size:12px;color:var(--accent);font-weight:600;background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.2);border-radius:20px;padding:6px 14px;display:none">
+        🔌 Lector USB listo
+      </div>
       <button class="bp" style="width:auto;padding:10px 20px;font-size:16px;margin-bottom:0" onclick="openScanner()">📷 REGISTRAR PERSONA</button>
     </div>
 
@@ -648,31 +651,111 @@ function parseFechaDNI(s){
   return'';
 }
 function buscarFecha(arr){for(const x of arr){const f=parseFechaDNI(x);if(f)return f;}return'';}
-function esDNI(s){const n=(s||'').replace(/\D/g,'');return(n.length>=7&&n.length<=8)?n:'';}
+function esDNI(s){const n=(s||'').replace(/[^\d]/g,'');return(n.length>=7&&n.length<=8)?n:'';}
 function parseDNI(raw){
   try{
     const txt=raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
+
+    // ── NUEVO DNI 2024: QR con separador | ──
+    // Formato: APELLIDO|NOMBRE|DNI|SEXO|FECHANAC|TRAMITE|... 
+    // o con prefijo: 00@TRAMITE@APELLIDO|NOMBRE|...
+    if(txt.includes('|')){
+      // Puede venir con prefijo @ antes del contenido con |
+      const parteQR=txt.includes('@')?txt.slice(txt.lastIndexOf('@')+1):txt;
+      const campos=parteQR.split('|').map(s=>s.trim());
+      // Buscar el campo que sea un DNI válido (7-8 dígitos)
+      let apellido='',nombre='',dni='',sexo='M',fechaNac='',domicilio='';
+      // Intentar formato: APELLIDO|NOMBRE|DNI|SEXO|FECHANAC|...
+      for(let i=0;i<campos.length;i++){
+        const d=esDNI(campos[i]);
+        if(d&&i>=2){
+          // Encontramos el DNI en posición i
+          apellido=soloLetras(campos[i-2]);
+          nombre=soloLetras(campos[i-1]);
+          dni=d;
+          sexo=(campos[i+1]||'').toUpperCase().startsWith('F')?'F':'M';
+          fechaNac=parseFechaDNI(campos[i+2])||buscarFecha(campos.slice(i+1,i+5));
+          domicilio=soloLetras(campos[i+5]||campos[i+4]||'');
+          break;
+        }
+      }
+      // Fallback: primer campo=apellido, segundo=nombre, buscar DNI
+      if(!apellido&&campos.length>=3){
+        apellido=soloLetras(campos[0]);
+        nombre=soloLetras(campos[1]);
+        dni=esDNI(campos[2])||buscarDNI(campos);
+        sexo=(campos[3]||'').toUpperCase().startsWith('F')?'F':'M';
+        fechaNac=buscarFecha(campos.slice(3));
+      }
+      if(apellido&&dni)return{apellido,nombre,sexo,dni,fechaNac,domicilio,foto:null};
+    }
+
+    // ── DNI CON SEPARADOR " (lector Amitosai MTS-SOTRE) ──
+    // Formato: TRAMITE"APELLIDO GAMARRA"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"...
+    if(txt.includes('"')){
+      const pRawQ=txt.split('"').map(s=>s.trim());
+      // El tramite puede estar al inicio sin comilla, buscar DNI para anclar
+      let apellido='',nombre='',sexo='M',dni='',fechaNac='',domicilio='';
+      for(let i=0;i<pRawQ.length;i++){
+        const d=esDNI(pRawQ[i]);
+        if(d&&i>=2){
+          // Encontramos DNI en posición i
+          // Apellido y nombre pueden estar juntos en i-2 separados por espacio, o separados
+          const apNom=(pRawQ[i-2]||'').trim();
+          const nomCampo=(pRawQ[i-1]||'').trim();
+          if(nomCampo&&apNom.includes(' ')&&!nomCampo.includes(' ')){
+            // apellido compuesto en i-2, nombre simple en i-1
+            apellido=soloLetras(apNom);nombre=soloLetras(nomCampo);
+          } else {
+            apellido=soloLetras(apNom);nombre=soloLetras(nomCampo);
+          }
+          dni=d;
+          sexo=(pRawQ[i-1]||pRawQ[i+1]||'').toUpperCase()==='F'?'F':'M';
+          // Sexo puede estar en i+1 si apellido y nombre están en campos separados
+          if(pRawQ[i+1]==='M'||pRawQ[i+1]==='F') sexo=pRawQ[i+1];
+          fechaNac=parseFechaDNI(pRawQ[i+2])||parseFechaDNI(pRawQ[i+3])||buscarFecha(pRawQ.slice(i+1,i+5));
+          break;
+        }
+      }
+      // Fallback simple: tramite"APELLIDO"NOMBRE"SEXO"DNI"...
+      if(!apellido&&pRawQ.length>=5){
+        apellido=soloLetras(pRawQ[1]);
+        nombre=soloLetras(pRawQ[2]);
+        sexo=(pRawQ[3]||'').toUpperCase().startsWith('F')?'F':'M';
+        dni=esDNI(pRawQ[4])||buscarDNI(pRawQ);
+        fechaNac=buscarFecha(pRawQ.slice(5));
+      }
+      if(apellido&&dni)return{apellido,nombre,sexo,dni,fechaNac,domicilio,foto:null};
+    }
+
+    // ── DNI TRADICIONAL: separador @ ──
     if(!txt.includes('@'))return null;
     const at=txt.indexOf('@');
-    const p=txt.slice(at).split('@').map(s=>s.replace(/[^\w\sáéíóúÁÉÍÓÚñÑüÜ\-]/g,'').trim());
+    const pRaw=txt.slice(at).split('@').map(s=>s.trim());
+    const p=pRaw.map(s=>s.replace(/[^\w\sáéíóúÁÉÍÓÚñÑüÜ\-]/g,'').trim());
     const tramite=(p[1]||'').replace(/\D/g,'');
     const esNuevo=p[0]===''&&tramite.length>=9;
     let apellido,nombre,sexo='M',dni,fechaNac='';
     if(esNuevo){
       apellido=soloLetras(p[2]);nombre=soloLetras(p[3]);
       sexo=(p[4]||'').toUpperCase().startsWith('F')?'F':'M';
-      dni=esDNI(p[5]);
+      dni=esDNI(pRaw[5])||esDNI(p[5]);
       fechaNac=parseFechaDNI(p[7])||parseFechaDNI(p[8])||buscarFecha(p.slice(6));
     }else{
       const o=p[0]===''?1:0;
       apellido=soloLetras(p[o]);nombre=soloLetras(p[o+1]);
       const t3=(p[o+2]||'').trim();
-      if(t3==='M'||t3==='F'){sexo=t3;dni=esDNI(p[o+3]);fechaNac=buscarFecha(p.slice(o+4));}
-      else{dni=esDNI(t3)||esDNI(p[o+3])||'';fechaNac=buscarFecha(p.slice(o+2));}
+      if(t3==='M'||t3==='F'){sexo=t3;dni=esDNI(pRaw[o+3])||esDNI(p[o+3]);fechaNac=buscarFecha(p.slice(o+4));}
+      else{dni=esDNI(pRaw[o+2])||esDNI(pRaw[o+3])||esDNI(t3)||esDNI(p[o+3])||'';fechaNac=buscarFecha(p.slice(o+2));}
     }
     if(!apellido||!dni)return null;
     return{apellido,nombre,sexo,dni,fechaNac,domicilio:'',foto:null};
   }catch(e){return null;}
+}
+
+function buscarDNI(arr){
+  for(const x of arr){const d=esDNI(x);if(d)return d;}
+  return'';
 }
 
 // ── SCANNER ──
@@ -1137,7 +1220,77 @@ renderAll();updExp();
 fetchVisitas().then(()=>{renderAll();updExp();});
 setupRealtime();
 
-// Polling cada 15 segundos como respaldo del realtime
+// Mostrar indicador lector USB solo en PC
+if(window.innerWidth>=900){
+  const usbInd=$('usb-indicator');
+  if(usbInd) usbInd.style.display='flex';
+}
+
+// ── LECTOR USB (pistola de código de barras) ──
+// Los lectores USB mandan el texto completo en <100ms y terminan con Enter
+let usbBuffer='';
+let usbTimer=null;
+let usbLastKey=0;
+
+document.addEventListener('keydown', e => {
+  // Ignorar si hay un input de texto activo (usuario escribiendo manualmente)
+  const active = document.activeElement;
+  const isTyping = active && (active.tagName==='INPUT'||active.tagName==='TEXTAREA') && active.id!=='usb-dummy';
+  if(isTyping) return;
+
+  const now=Date.now();
+
+  if(e.key==='Enter'){
+    // Enter = fin de lectura del lector
+    if(usbBuffer.length>20 && (now-usbLastKey)<200){
+      const raw=usbBuffer;
+      usbBuffer='';
+      clearTimeout(usbTimer);
+      procesarCodigoUSB(raw);
+    } else {
+      usbBuffer='';
+    }
+    return;
+  }
+
+  // Si pasan más de 100ms entre teclas, probablemente es escritura humana
+  if(now-usbLastKey>100 && usbBuffer.length>0){
+    usbBuffer='';
+  }
+
+  usbLastKey=now;
+  // Capturar la tecla correctamente (incluir " y caracteres especiales)
+  if(e.key.length===1||e.key==='"'){
+    usbBuffer+=e.key;
+  }
+
+  // Limpiar buffer si no llega Enter en 300ms
+  clearTimeout(usbTimer);
+  usbTimer=setTimeout(()=>{ usbBuffer=''; }, 300);
+});
+
+function procesarCodigoUSB(raw){
+  // Ignorar si el scanner de cámara está abierto
+  if(!$('scanner').classList.contains('hidden')) return;
+  // Ignorar si hay un modal abierto
+  if(!$('mod-confirm').classList.contains('hidden')) return;
+  if(!$('mod-manual').classList.contains('hidden')) return;
+
+  const parsed=parseDNI(raw);
+  if(!parsed){
+    showToast('⚠️ Código no reconocido como DNI');
+    return;
+  }
+
+  if(navigator.vibrate) navigator.vibrate(150);
+  pendingData=parsed;
+  showToast('✅ DNI leído: '+parsed.apellido+' '+parsed.nombre);
+
+  // Mismo flujo que el scanner de cámara
+  setTimeout(()=>openFotoScreen(), 400);
+}
+
+// ── POLLING cada 15 segundos como respaldo del realtime ──
 setInterval(()=>{
   fetchVisitas().then(()=>{renderAll();if($('tab-search').classList.contains('active'))renderSearch();});
 },15000);
