@@ -691,39 +691,33 @@ function parseDNI(raw){
     }
 
     // ── DNI CON SEPARADOR " (lector Amitosai MTS-SOTRE) ──
-    // Formato: TRAMITE"APELLIDO GAMARRA"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"...
+    // Formato exacto: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"...
     if(txt.includes('"')){
-      const pRawQ=txt.split('"').map(s=>s.trim());
-      // El tramite puede estar al inicio sin comilla, buscar DNI para anclar
+      // Limpiar caracteres de control pero conservar " y datos
+      const limpio=txt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
+      const campos=limpio.split('"').map(s=>s.trim()).filter(s=>s.length>0);
+      // campos[0]=TRAMITE, campos[1]=APELLIDO, campos[2]=NOMBRE, campos[3]=SEXO, campos[4]=DNI
       let apellido='',nombre='',sexo='M',dni='',fechaNac='',domicilio='';
-      for(let i=0;i<pRawQ.length;i++){
-        const d=esDNI(pRawQ[i]);
-        if(d&&i>=2){
-          // Encontramos DNI en posición i
-          // Apellido y nombre pueden estar juntos en i-2 separados por espacio, o separados
-          const apNom=(pRawQ[i-2]||'').trim();
-          const nomCampo=(pRawQ[i-1]||'').trim();
-          if(nomCampo&&apNom.includes(' ')&&!nomCampo.includes(' ')){
-            // apellido compuesto en i-2, nombre simple en i-1
-            apellido=soloLetras(apNom);nombre=soloLetras(nomCampo);
-          } else {
-            apellido=soloLetras(apNom);nombre=soloLetras(nomCampo);
-          }
+      // Buscar el DNI para anclar la posición
+      for(let i=0;i<campos.length;i++){
+        const d=esDNI(campos[i]);
+        if(d){
           dni=d;
-          sexo=(pRawQ[i-1]||pRawQ[i+1]||'').toUpperCase()==='F'?'F':'M';
-          // Sexo puede estar en i+1 si apellido y nombre están en campos separados
-          if(pRawQ[i+1]==='M'||pRawQ[i+1]==='F') sexo=pRawQ[i+1];
-          fechaNac=parseFechaDNI(pRawQ[i+2])||parseFechaDNI(pRawQ[i+3])||buscarFecha(pRawQ.slice(i+1,i+5));
+          // Apellido está 3 posiciones antes del DNI
+          // Nombre está 2 posiciones antes del DNI  
+          // Sexo está 1 posición antes del DNI
+          if(i>=3){
+            apellido=soloLetras(campos[i-3]);
+            nombre=soloLetras(campos[i-2]);
+            sexo=(campos[i-1]||'').toUpperCase()==='F'?'F':'M';
+          } else if(i>=2){
+            apellido=soloLetras(campos[i-2]);
+            nombre=soloLetras(campos[i-1]);
+          }
+          // Fecha de nacimiento está 2 posiciones después del DNI (saltando ejemplar)
+          fechaNac=parseFechaDNI(campos[i+2])||parseFechaDNI(campos[i+1])||buscarFecha(campos.slice(i+1,i+5));
           break;
         }
-      }
-      // Fallback simple: tramite"APELLIDO"NOMBRE"SEXO"DNI"...
-      if(!apellido&&pRawQ.length>=5){
-        apellido=soloLetras(pRawQ[1]);
-        nombre=soloLetras(pRawQ[2]);
-        sexo=(pRawQ[3]||'').toUpperCase().startsWith('F')?'F':'M';
-        dni=esDNI(pRawQ[4])||buscarDNI(pRawQ);
-        fechaNac=buscarFecha(pRawQ.slice(5));
       }
       if(apellido&&dni)return{apellido,nombre,sexo,dni,fechaNac,domicilio,foto:null};
     }
