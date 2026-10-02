@@ -691,31 +691,46 @@ function parseDNI(raw){
     }
 
     // ── DNI CON SEPARADOR " (lector Amitosai MTS-SOTRE) ──
-    // Formato exacto: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"...
+    // Formato viejo: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"...
+    // Formato nuevo: TRAMITE"APELLIDO"NOMBRE"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"JWT...
     if(txt.includes('"')){
-      // Limpiar caracteres de control pero conservar " y datos
       const limpio=txt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
       const campos=limpio.split('"').map(s=>s.trim()).filter(s=>s.length>0);
-      // campos[0]=TRAMITE, campos[1]=APELLIDO, campos[2]=NOMBRE, campos[3]=SEXO, campos[4]=DNI
       let apellido='',nombre='',sexo='M',dni='',fechaNac='',domicilio='';
-      // Buscar el DNI para anclar la posición
+      // Buscar DNI para anclar posición
       for(let i=0;i<campos.length;i++){
         const d=esDNI(campos[i]);
         if(d){
           dni=d;
-          // Apellido está 3 posiciones antes del DNI
-          // Nombre está 2 posiciones antes del DNI  
-          // Sexo está 1 posición antes del DNI
           if(i>=3){
+            // Verificar si campo anterior es sexo (M o F de 1 char)
+            const posibleSexo=(campos[i-1]||'').toUpperCase();
+            if(posibleSexo==='M'||posibleSexo==='F'){
+              // Formato viejo: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"...
+              sexo=posibleSexo;
+              apellido=soloLetras(campos[i-3]);
+              nombre=soloLetras(campos[i-2]);
+            } else {
+              // Formato nuevo: TRAMITE"APELLIDO"NOMBRE"DNI"...
+              apellido=soloLetras(campos[i-2]);
+              nombre=soloLetras(campos[i-1]);
+              sexo='M'; // No viene en el QR nuevo, defaultear a M
+            }
+          } else if(i===3){
             apellido=soloLetras(campos[i-3]);
             nombre=soloLetras(campos[i-2]);
-            sexo=(campos[i-1]||'').toUpperCase()==='F'?'F':'M';
+            const ps=(campos[i-1]||'').toUpperCase();
+            if(ps==='M'||ps==='F'){sexo=ps;}
+            else{nombre=soloLetras(campos[i-1]);}
           } else if(i>=2){
             apellido=soloLetras(campos[i-2]);
             nombre=soloLetras(campos[i-1]);
           }
-          // Fecha de nacimiento está 2 posiciones después del DNI (saltando ejemplar)
-          fechaNac=parseFechaDNI(campos[i+2])||parseFechaDNI(campos[i+1])||buscarFecha(campos.slice(i+1,i+5));
+          // Fecha nac: buscar en campos siguientes (saltar ejemplar y JWT)
+          for(let j=i+1;j<Math.min(i+4,campos.length);j++){
+            const f=parseFechaDNI(campos[j]);
+            if(f){fechaNac=f;break;}
+          }
           break;
         }
       }
@@ -760,7 +775,7 @@ async function openScanner(){
     qrScanner=new Html5Qrcode('qr-reader',{verbose:false});
     await qrScanner.start(
       {facingMode:'environment'},
-      {fps:15,qrbox:{width:280,height:175},formatsToSupport:[Html5QrcodeSupportedFormats.PDF_417,Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.DATA_MATRIX]},
+      {fps:10,qrbox:{width:300,height:300},formatsToSupport:[Html5QrcodeSupportedFormats.PDF_417,Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.DATA_MATRIX,Html5QrcodeSupportedFormats.AZTEC]},
       (txt)=>{
         if(scanLocked)return;
         const parsed=parseDNI(txt);
