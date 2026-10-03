@@ -7,7 +7,6 @@
 <title>VisitasReg</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -760,25 +759,6 @@ function buscarDNI(arr){
 
 // ── SCANNER ──
 let qrScanner=null,scanLocked=false;
-// Intentar leer QR cuadrado (Data Matrix) con ZXing como fallback
-let zxingReader=null;
-async function tryZXing(videoEl,callback){
-  try{
-    if(typeof ZXing==='undefined')return false;
-    const hints=new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[
-      ZXing.BarcodeFormat.DATA_MATRIX,
-      ZXing.BarcodeFormat.QR_CODE,
-      ZXing.BarcodeFormat.PDF_417
-    ]);
-    zxingReader=new ZXing.BrowserMultiFormatReader(hints);
-    await zxingReader.decodeFromVideoElement(videoEl,(result,err)=>{
-      if(result)callback(result.getText());
-    });
-    return true;
-  }catch(e){return false;}
-}
-
 async function openScanner(){
   scanLocked=false;$('scanner').classList.remove('hidden');
   try{
@@ -816,8 +796,7 @@ async function openScanner(){
 }
 function closeScanner(){
   scanLocked=true;
-  if(qrScanner){const s=qrScanner;qrScanner=null;s.stop().catch(()=>{});}
-  if(zxingReader){zxingReader.reset();zxingReader=null;}}
+  if(qrScanner){const s=qrScanner;qrScanner=null;s.stop().catch(()=>{});}}
   $('scanner').classList.add('hidden');
 }
 
