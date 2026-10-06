@@ -470,7 +470,7 @@ const loadCache=()=>{try{return JSON.parse(localStorage.getItem('vreg_cache')||'
 async function fetchVisitas(){
   setSyncDot('loading');
   try{
-    const{data,error}=await sb.from('visitas').select('*').order('entrada',{ascending:false});
+    const{data,error}=await sb.from('visitas').select('*').order('entrada',{ascending:false}).range(0,9999);
     if(error)throw error;
     // Mapear columnas snake_case → camelCase para el resto del código
     const rows=(data||[]).map(mapFromDB);
@@ -590,7 +590,7 @@ function setupRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'visitas'},async()=>{
       // Fetch silencioso — no toca el sync dot
       try{
-        const{data}=await sb.from('visitas').select('*').order('entrada',{ascending:false});
+        const{data}=await sb.from('visitas').select('*').order('entrada',{ascending:false}).range(0,9999);
         if(data){
           localCache=(data||[]).map(mapFromDB);
           saveCache(localCache);
@@ -691,43 +691,33 @@ function parseDNI(raw){
     }
 
     // ── DNI CON SEPARADOR " (lector Amitosai MTS-SOTRE) ──
-    // Formato viejo: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"...
-    // Formato nuevo: TRAMITE"APELLIDO"NOMBRE"DNI"EJEMPLAR"FECHANAC"FECHAEMISION"JWT...
+    // Formato PDF417: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"EJEMPLAR"FECHANAC"...
+    // Formato QR nuevo: TRAMITE"APELLIDO"NOMBRE"DNI"EJEMPLAR"FECHANAC"JWT...
     if(txt.includes('"')){
       const limpio=txt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').trim();
       const campos=limpio.split('"').map(s=>s.trim()).filter(s=>s.length>0);
       let apellido='',nombre='',sexo='M',dni='',fechaNac='',domicilio='';
-      // Buscar DNI para anclar posición
+      // Buscar el DNI numérico para anclar posición
       for(let i=0;i<campos.length;i++){
         const d=esDNI(campos[i]);
         if(d){
           dni=d;
-          if(i>=3){
-            // Verificar si campo anterior es sexo (M o F de 1 char)
-            const posibleSexo=(campos[i-1]||'').toUpperCase();
-            if(posibleSexo==='M'||posibleSexo==='F'){
-              // Formato viejo: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI"...
-              sexo=posibleSexo;
-              apellido=soloLetras(campos[i-3]);
-              nombre=soloLetras(campos[i-2]);
-            } else {
-              // Formato nuevo: TRAMITE"APELLIDO"NOMBRE"DNI"...
-              apellido=soloLetras(campos[i-2]);
-              nombre=soloLetras(campos[i-1]);
-              sexo='M'; // No viene en el QR nuevo, defaultear a M
-            }
-          } else if(i===3){
-            apellido=soloLetras(campos[i-3]);
-            nombre=soloLetras(campos[i-2]);
-            const ps=(campos[i-1]||'').toUpperCase();
-            if(ps==='M'||ps==='F'){sexo=ps;}
-            else{nombre=soloLetras(campos[i-1]);}
+          const prev1=(campos[i-1]||'').trim().toUpperCase();
+          const prev2=(campos[i-2]||'').trim();
+          const prev3=(campos[i-3]||'').trim();
+          if(i>=3&&(prev1==='M'||prev1==='F')){
+            // PDF417: TRAMITE"APELLIDO"NOMBRE"SEXO"DNI
+            sexo=prev1;
+            apellido=soloLetras(prev3);
+            nombre=soloLetras(prev2);
           } else if(i>=2){
-            apellido=soloLetras(campos[i-2]);
-            nombre=soloLetras(campos[i-1]);
+            // QR nuevo: TRAMITE"APELLIDO"NOMBRE"DNI
+            apellido=soloLetras(prev2);
+            nombre=soloLetras(prev1);
+            sexo='M';
           }
-          // Fecha nac: buscar en campos siguientes (saltar ejemplar y JWT)
-          for(let j=i+1;j<Math.min(i+4,campos.length);j++){
+          // Buscar fecha de nacimiento en campos siguientes
+          for(let j=i+1;j<Math.min(i+5,campos.length);j++){
             const f=parseFechaDNI(campos[j]);
             if(f){fechaNac=f;break;}
           }
@@ -775,7 +765,7 @@ async function openScanner(){
     qrScanner=new Html5Qrcode('qr-reader',{verbose:false});
     await qrScanner.start(
       {facingMode:'environment'},
-      {fps:10,qrbox:{width:300,height:300},formatsToSupport:[Html5QrcodeSupportedFormats.PDF_417,Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.DATA_MATRIX,Html5QrcodeSupportedFormats.AZTEC]},
+      {fps:15,qrbox:{width:280,height:200},formatsToSupport:[Html5QrcodeSupportedFormats.PDF_417,Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.DATA_MATRIX,Html5QrcodeSupportedFormats.AZTEC]},
       (txt)=>{
         if(scanLocked)return;
         const parsed=parseDNI(txt);
