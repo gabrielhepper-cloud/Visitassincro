@@ -467,12 +467,16 @@ const saveCache=rows=>{try{localStorage.setItem('vreg_cache',JSON.stringify(rows
 const loadCache=()=>{try{return JSON.parse(localStorage.getItem('vreg_cache')||'[]')}catch{return[]}};
 
 // ── DB VISITAS ──
+let totalRealCount=0;
 async function fetchVisitas(){
   setSyncDot('loading');
   try{
+    // Traer count real por separado
+    const{count}=await sb.from('visitas').select('*',{count:'exact',head:true});
+    if(count!==null)totalRealCount=count;
+    // Traer datos paginados (últimos 500 para mostrar)
     const{data,error}=await sb.from('visitas').select('*').order('entrada',{ascending:false}).range(0,9999);
     if(error)throw error;
-    // Mapear columnas snake_case → camelCase para el resto del código
     const rows=(data||[]).map(mapFromDB);
     saveCache(rows);
     localCache=rows;
@@ -1034,7 +1038,7 @@ function renderAll(){
   const today=todayStr();
   const todayV=db.filter(v=>v.entrada&&v.entrada.startsWith(today));
   const active=db.filter(v=>!v.salida);
-  $('st-today').textContent=todayV.length;$('st-active').textContent=active.length;$('st-total').textContent=db.length;
+  $('st-today').textContent=todayV.length;$('st-active').textContent=active.length;$('st-total').textContent=totalRealCount>0?totalRealCount:db.length;
   if(active.length===0){$('active-sec').classList.add('hidden');}
   else{
     $('active-sec').classList.remove('hidden');
